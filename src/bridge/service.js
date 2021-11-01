@@ -9,7 +9,7 @@ const { findCourseFromDb } = require("../discordBot/services/service");
 
 const validDiscordChannel = async (courseName) => {
   const guild = await discordClient.guilds.fetch(process.env.GUILD_ID);
-  courseName = courseName.replace(/ /g, "-");
+  courseName = courseName.replace(/ /g, "-").toLowerCase();
   const channel = guild.channels.cache.find(
     c => c.name === `${courseName}_general`,
   );
@@ -123,45 +123,53 @@ const isMessageCryptoSpam = (message) => {
 const handleBridgeMessage = async (message, courseName, Course) => {
   if (!message.channel.parent || message.type === "CHANNEL_PINNED_MESSAGE") return;
 
-  const group = await Course.findOne({ where: { name: String(courseName) } });
+  const group = await findCourseFromDb(courseName, Course);
 
   if (!group || group.telegramId == null) {
     return;
   }
 
   if (message.author.bot) return;
-
   const sender = message.member.displayName;
   let channel = ":";
 
   if (!message.channel.name.includes("general")) {
-    channel = escapeChars(" on " + (message.channel.name.split(courseName.replace(" ", "-"))[1]).substring(1) + " channel:\n");
+    channel = escapeChars(" on " + (message.channel.name.split(courseName.toLowerCase().replace(" ", "-"))[1]).substring(1) + " channel:\n");
   }
 
   let msg = message.content;
   if (msg[0] === "/") return;
 
-  while (msg.includes("<#")) {
+  while (msg.match(/(?<=<#).*?(?=>)/)) {
     const channelID = msg.match(/(?<=<#).*?(?=>)/)[0];
     let channelName = message.guild.channels.cache.get(channelID);
     channelName ? channelName = channelName.name : channelName = "UnknownChannel";
     msg = msg.replace("<#" + channelID + ">", "#" + channelName);
   }
 
-  while (msg.includes("<@!")) {
+  while (msg.match(/(?<=<@!).*?(?=>)/)) {
     const userID = msg.match(/(?<=<@!).*?(?=>)/)[0];
     let userName = message.guild.members.cache.get(userID);
     userName ? userName = userName.user.username : userName = "Jon Doe";
     msg = msg.replace("<@!" + userID + ">", userName);
   }
 
-  while (msg.includes("<@&")) {
+  while (msg.match(/(?<=<@&).*?(?=>)/)) {
     const roleID = msg.match(/(?<=<@&).*?(?=>)/)[0];
     let roleName = message.guild.roles.cache.get(roleID);
     roleName ? roleName = roleName.name : roleName = "Unknown Role";
     msg = msg.replace("<@&" + roleID + ">", roleName);
   }
 
+  while (msg.match(/(?<=<a:).*?(?=>)/)) {
+    const emojiId = msg.match(/(?<=<a:).*?(?=>)/)[0];
+    msg = msg.replace("<a:" + emojiId + ">", "");
+  }
+
+  while (msg.match(/(?<=<:).*?(?=>)/)) {
+    const emojiId = msg.match(/(?<=<:).*?(?=>)/)[0];
+    msg = msg.replace("<:" + emojiId + ">", "");
+  }
   const media = message.attachments.first();
   const gif = message.embeds[0];
   try {
@@ -211,8 +219,10 @@ const validateContent = (content) => {
 };
 
 const sendMessageToTelegram = async (telegramId, content, sender, channel) => {
-
-  sender ? escapeChars(sender) : null;
+  if (content === "") {
+    return;
+  }
+  sender ? sender = escapeChars(sender) : sender = null;
   content = validateContent(content);
   try {
     sender ?

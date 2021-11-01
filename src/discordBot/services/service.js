@@ -52,24 +52,24 @@ const updateGuideMessage = async (message, Course) => {
       const count = guild.roles.cache.find(
         (role) => role.name === course.name,
       )?.members.size;
-      return `  - ${code} - ${fullname} - \`/join ${course.name}\` 👤${count}`;
+      return `  - ${code} - ${fullname} 👤${count}`;
     });
 
   const newContent = `
 Käytössäsi on seuraavia komentoja:
   - \`/join\` jolla voit liittyä kurssille
   - \`/leave\` jolla voit poistua kurssilta
-Esim: \`/join ohpe\`
+Kirjoittamalla \`/join\` tai \`/leave\` botti antaa listan kursseista.
 
 You have the following commands available:
   - \`/join\` which you can use to join a course
   - \`/leave\` which you can use to leave a course
-For example: \`/join ohpe\`
+The bot gives a list of the courses if you type \`/join\` or \`/leave\`.
 
 Kurssit / Courses:
 ${rows.join("\n")}
 
-In course specific channels you can also list instructors \`/instructors\`
+In course specific channels you can also list instructors with the command \`/instructors\`
 
 See more with \`/help\` command.
 
@@ -90,7 +90,7 @@ const updateGuide = async (guild, Course) => {
 
 const createCourseInvitationLink = (courseName) => {
   courseName = courseName.replace(/ /g, "%20").trim();
-  return `Invitation link for the course ${invite_url}/join/${courseName}`;
+  return `Invitation link for the course <${invite_url}/join/${courseName}>`;
 };
 
 const createInvitation = async (guild, args) => {
@@ -107,7 +107,7 @@ const createInvitation = async (guild, args) => {
   let invitationlink;
   if (args === GUIDE_CHANNEL_NAME) {
     await guide.createInvite({ maxAge: 0, unique: true, reason: args });
-    invitationlink = `Invitation link for the server ${invite_url}`;
+    invitationlink = `Invitation link for the server <${invite_url}>`;
   }
   else {
     invitationlink = createCourseInvitationLink(args);
@@ -158,7 +158,12 @@ const findOrCreateChannel = async (channelObject, guild) => {
   const { name, options } = channelObject;
   const alreadyExists = guild.channels.cache.find(
     (c) => c.type === options.type && c.name.toLowerCase() === name.toLowerCase());
-  if (alreadyExists) return alreadyExists;
+  if (alreadyExists) {
+    if (options?.topic && alreadyExists.topic !== options.topic) {
+      return await alreadyExists.setTopic(options.topic);
+    }
+    return alreadyExists;
+  }
   return await guild.channels.create(name, options);
 };
 
@@ -188,7 +193,7 @@ const deletecommand = async (client, commandToDeleteName) => {
   });
 };
 
-const emojiRegex = /(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])/i;
+const emojiRegex = /(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])/gi;
 
 const isCourseCategory = (channel) => {
   if (channel && channel.name) {
@@ -338,7 +343,7 @@ const findCourseNickNameFromDbWithCourseCode = async (courseName, Course) => {
 const findChannelFromDbByName = async (channelName, Channel) => {
   return await Channel.findOne({
     where: {
-      name: channelName,
+      name: { [Sequelize.Op.iLike]: channelName },
     },
   });
 };

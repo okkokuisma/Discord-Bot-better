@@ -24,7 +24,12 @@ const sendErrorReportNoInteraction = async (telegramId, member, channel, client,
 };
 
 const sendErrorEphemeral = async (interaction, msg) => {
-  await interaction.reply({ content: `Error: ${msg}`, ephemeral: true });
+  if (interaction.deferred || interaction.replied) {
+    await interaction.editReply({ content: `Error: ${msg}`, ephemeral: true });
+  }
+  else {
+    await interaction.reply({ content: `Error: ${msg}`, ephemeral: true });
+  }
 };
 
 const sendEphemeral = async (interaction, msg) => {
@@ -35,12 +40,40 @@ const editEphemeral = async (interaction, msg) => {
   await interaction.editReply({ content: `${msg}`, ephemeral: true });
 };
 
+const editEphemeralWithComponents = async (interaction, msg, components) => {
+  return await interaction.editReply({ content: `${msg}`, components: [components], ephemeral: true });
+};
+
+const editEphemeralClearComponents = async (interaction, msg) => {
+  await interaction.editReply({ content: `${msg}`, components: [], ephemeral: true });
+};
 const editErrorEphemeral = async (interaction, msg) => {
   await interaction.editReply({ content: `Error: ${msg}`, ephemeral: true });
 };
 
-const sendReplyMessage = async (interaction, msg) => {
-  await interaction.reply({ content: `${msg}` });
+const sendReplyMessage = async (interaction, channel, msg) => {
+  const interactionId = interaction.id;
+  const reply = await interaction.reply({ content: `${msg}` });
+  setTimeout(async () => {
+    try {
+      const fetchedReply = await channel.messages.fetch(reply.id);
+      fetchedReply.delete();
+    }
+    catch (e) {
+      // console.log(error);
+    }
+    try {
+      const fetchedInteraction = await channel.messages.fetch(interactionId);
+      fetchedInteraction.delete();
+    }
+    catch (e) {
+      // console.log(error);
+    }
+  }, 86400000);
+};
+
+const sendFollowUpEphemeral = async (interaction, msg) => {
+  await interaction.followUp({ content: `${msg}`, ephemeral: true });
 };
 
 const confirmChoice = async (interaction, msg) => {
@@ -148,8 +181,11 @@ module.exports = {
   sendErrorReportNoInteraction,
   sendEphemeral,
   editEphemeral,
+  editEphemeralWithComponents,
+  editEphemeralClearComponents,
   editErrorEphemeral,
   sendReplyMessage,
+  sendFollowUpEphemeral,
   confirmChoice,
   confirmChoiceNoInteraction,
 };

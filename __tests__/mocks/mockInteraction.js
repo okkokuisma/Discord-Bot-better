@@ -4,7 +4,6 @@ const prefix = "/";
 
 const adminD = client.commands.map(c => c);
 const faculty = client.slashCommands.filter(command => command.roles).filter(command => !command.roles.includes(courseAdminRole));
-const courseAdmin = client.slashCommands.filter(command => command.roles).filter(command => command.roles.includes(courseAdminRole));
 const studentD = client.slashCommands.filter(command => !command.roles && command.name !== "auth");
 
 const teacherData = [];
@@ -18,9 +17,6 @@ teacherData.push("\n");
 teacherData2.push(`Category: **${facultyRole}**`);
 teacherData2.push(faculty.map(command => `**${command.usage}** - ${command.description}`).join("\n"));
 teacherData2.push(`[User manual for faculty](<${githubRepo}/blob/main/documentation//usermanual-faculty.md>)`);
-teacherData2.push("\n");
-teacherData2.push(`Category: **${courseAdminRole}**`);
-teacherData2.push(courseAdmin.map(command => `**${command.usage}** - ${command.description}`).join("\n"));
 teacherData2.push("\n");
 teacherData2.push("*Commands can be used only in course channels");
 teacherData2.push(`\nYou can send \`${prefix}help [command name]\` to get info on a specific command!`);
@@ -49,9 +45,6 @@ adminData.push("\n");
 adminData2.push(`Category: **${facultyRole}**`);
 adminData2.push(faculty.map(command => `**${command.usage}** - ${command.description}`).join("\n"));
 adminData2.push(`[User manual for faculty](<${githubRepo}/blob/main/documentation//usermanual-faculty.md>)`);
-adminData2.push("\n");
-adminData2.push(`Category: **${courseAdminRole}**`);
-adminData2.push(courseAdmin.map(command => `**${command.usage}** - ${command.description}`).join("\n"));
 adminData2.push("\n");
 adminData2.push("*Commands can be used only in course channels");
 adminData2.push(`\nYou can send \`${prefix}help [command name]\` to get info on a specific command!`);
@@ -86,6 +79,7 @@ const teacher = {
     fetch: jest.fn(),
     remove: jest.fn((role) => teacher.roles.cache = teacher.roles.cache.filter(r => r.name !== role.name)),
   },
+  _roles: [1, 3, 4],
   fetch: jest.fn(),
   displayName: "teacher",
   user: {
@@ -103,12 +97,16 @@ const student = {
     fetch: jest.fn(),
     remove: jest.fn((role) => student.roles.cache = student.roles.cache.filter(r => r.name !== role.name)),
   },
+  _roles: [3],
   fetch: jest.fn(),
   displayName: "student",
+  user: {
+    id: 2,
+  },
 };
 
 const admin = {
-  id: 2,
+  id: 3,
   nickname: "admin",
   roles: {
     cache: [{ name: "admin" }],
@@ -117,8 +115,13 @@ const admin = {
     fetch: jest.fn(),
     remove: jest.fn((role) => admin.roles.cache = admin.roles.cache.filter(r => r.name !== role.name)),
   },
+  _roles: [2, 3],
   fetch: jest.fn(),
   displayName: "admin",
+  user: {
+    id: 3,
+    bot: false,
+  },
 };
 
 const guideChannel = {
@@ -226,14 +229,14 @@ const defaultAdminInteraction = {
   client: client,
   channelId: 2,
   member: {
-    user: {
-      id: 3,
-    },
+    user: admin,
     _roles: [2, 3],
+    roles: [2, 3],
   },
   options: undefined,
   commandName: "test",
   reply: jest.fn(),
+  editReply: jest.fn(),
 };
 
 module.exports = {

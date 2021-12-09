@@ -5,23 +5,23 @@ const {
   msToMinutesAndSeconds,
   getCourseNameFromCategory,
   isCourseCategory } = require("../../services/service");
-const { editErrorEphemeral, sendEphemeral, editEphemeral, confirmChoice } = require("../../services/message");
+const { editErrorEphemeral, sendEphemeral, editEphemeral } = require("../../services/message");
+const { confirmChoice } = require("../../services/confirm");
 const { facultyRole } = require("../../../../config.json");
+const { saveChannelTopicToDb } = require("../../../db/services/channelService");
 
-const execute = async (interaction, client) => {
+const execute = async (interaction, client, models) => {
   await sendEphemeral(interaction, "Editing topic...");
   const newTopic = interaction.options.getString("topic").trim();
 
   const guild = client.guild;
   const channel = guild.channels.cache.get(interaction.channelId);
 
-  if (!isCourseCategory(channel?.parent)) {
+  if (!await isCourseCategory(channel?.parent, models.Course)) {
     return await editErrorEphemeral(interaction, "This is not a course category, can not execute the command!");
   }
 
   const categoryName = getCourseNameFromCategory(channel.parent, guild);
-  const channelAnnouncement = guild.channels.cache.find(c => c.parent === channel.parent && c.name.includes("_announcement"));
-  const channelGeneral = guild.channels.cache.find(c => c.parent === channel.parent && c.name.includes("_general"));
 
   const confirm = await confirmChoice(interaction, "Change topic to: " + newTopic);
 
@@ -36,8 +36,8 @@ const execute = async (interaction, client) => {
     return await editErrorEphemeral(interaction, `Command cooldown [mm:ss]: you need to wait ${time}!`);
   }
 
-  await channelAnnouncement.setTopic(newTopic);
-  await channelGeneral.setTopic(newTopic);
+  await channel.setTopic(newTopic);
+  await saveChannelTopicToDb(getCourseNameFromCategory(channel.name), newTopic, models.Channel);
 
   await editEphemeral(interaction, "Channel topic has been changed");
   handleCooldown(categoryName);

@@ -1,11 +1,13 @@
 const { sendErrorReportNoInteraction } = require("../discordBot/services/message");
+const { logError, logNoInteractionError } = require("../discordBot/services/logger");
 let discordClient;
 let telegramClient;
 const keywords = ["crypto", "krypto", "btc", "doge", "btc", "eth", "musk", "money", "$", "usd", "bitcoin", "muskx.co", "coin", "elonmusk", "prize", "еlonmusk", "btc", "cash", "million",
   "interest", "investment", "join"];
 const cyrillicPattern = /^\p{Script=Cyrillic}+$/u;
-const { findCourseFromDb } = require("../discordBot/services/service");
 
+const { findCourseFromDb } = require("../db/services/courseService");
+const bridgedMessagesCounter = require("../promMetrics/bridgedMessagesCounter");
 
 const validDiscordChannel = async (courseName) => {
   const guild = await discordClient.guilds.fetch(process.env.GUILD_ID);
@@ -21,8 +23,19 @@ const createDiscordUser = async (ctx) => {
   const userId = ctx.message.from.username || "undefined";
   let url;
   const t = await telegramClient.telegram.getUserProfilePhotos(ctx.message.from.id);
-  if (t.photos.length) url = await telegramClient.telegram.getFileLink(t.photos[0][0].file_id);
-  const user = { username: username, avatarUrl: url, userId: userId };
+  try {
+    if (t.photos.length) url = await telegramClient.telegram.getFileLink(t.photos[0][0].file_id);
+  }
+  catch (error) {
+    logError(error);
+  }
+  let user;
+  if (url) {
+    user = { username: username, avatarUrl: url, userId: userId };
+  }
+  else {
+    user = { username: username, userId: userId };
+  }
   return user;
 };
 
@@ -44,7 +57,7 @@ const sendMessageToDiscord = async (ctx, message, channel) => {
         return;
       }
       await webhook.send({
-        content: message.content.text,
+        content: message.content.text.replace("@", ""),
         username: message.user.username,
         avatarURL: message.user.avatarUrl,
       });
@@ -76,8 +89,11 @@ const sendMessageToDiscord = async (ctx, message, channel) => {
         files: [message.content.video.url],
       });
     }
+    const course = channel.name.split("_")[0];
+    bridgedMessagesCounter.inc({ origin: "telegram", course });
   }
   catch (error) {
+    logError(error);
     console.error("Error trying to send a message: ", error);
   }
 };
@@ -182,8 +198,10 @@ const handleBridgeMessage = async (message, courseName, Course) => {
     else {
       await sendMessageToTelegram(group.telegramId, msg, sender, channel);
     }
+    bridgedMessagesCounter.inc({ origin: "discord", course: group.name });
   }
   catch (error) {
+    logNoInteractionError(group.telegramId, message.member, message.channel.name, discordClient, error.toString());
     return await sendErrorReportNoInteraction(group.telegramId, message.member, message.channel.name, discordClient, error.toString());
   }
 };
@@ -230,6 +248,7 @@ const sendMessageToTelegram = async (telegramId, content, sender, channel) => {
       await telegramClient.telegram.sendMessage(telegramId, `${content}`, { parse_mode: "MarkdownV2" });
   }
   catch (error) {
+    logError(error);
     return error;
   }
 };
@@ -258,6 +277,7 @@ const sendMediaToTelegram = async (telegramId, info, sender, channel, media) => 
     }
   }
   catch (error) {
+    logError(error);
     return error;
   }
 };
@@ -269,6 +289,7 @@ const sendAnimationToTelegram = async (telegramId, sender, channel, url) => {
     await telegramClient.telegram.sendAnimation(telegramId, { url }, { caption, parse_mode: "MarkdownV2" });
   }
   catch (error) {
+    logError(error);
     return error;
   }
 };
@@ -280,7 +301,7 @@ const lockTelegramCourse = async (Course, courseName) => {
   }
   const telegramId = group.telegramId;
   const permissions = {
-    "can_send_messages" : false,
+    "can_send_messages": false,
     "can_send_media_messages": false,
     "can_send_polls": false,
     "can_send_other_messages": false,
@@ -293,6 +314,7 @@ const lockTelegramCourse = async (Course, courseName) => {
   }
   catch (error) {
     console.log("Error " + error);
+    logError(error);
     return error;
   }
 };
@@ -305,7 +327,7 @@ const unlockTelegramCourse = async (Course, courseName) => {
   const telegramId = group.telegramId;
   try {
     const permissions = {
-      "can_send_messages" : true,
+      "can_send_messages": true,
       "can_send_media_messages": true,
       "can_send_polls": true,
       "can_send_other_messages": true,
@@ -316,6 +338,7 @@ const unlockTelegramCourse = async (Course, courseName) => {
     await sendMessageToTelegram(group.telegramId, "This chat has been unlocked", null, "");
   }
   catch (error) {
+    logError(error);
     return error;
   }
 };

@@ -1,4 +1,10 @@
-const { Sequelize } = require("sequelize");
+const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
+const { logError } = require("./logger");
+const { findCoursesFromDb, findAllCourseNames, findCourseFromDb } = require("../../db/services/courseService");
+const { findCourseMemberCount } = require("../../db/services/courseMemberService");
+const { courseAdminRole, facultyRole } = require("../../../config.json");
 
 require("dotenv").config();
 const GUIDE_CHANNEL_NAME = "guide";
@@ -6,22 +12,6 @@ const GUIDE_CHANNEL_NAME = "guide";
 let invite_url = "";
 
 process.env.NODE_ENV === "production" ? invite_url = `${process.env.BACKEND_SERVER_URL}` : invite_url = `${process.env.BACKEND_SERVER_URL}:${process.env.PORT}`;
-
-const getUnlockedCourse = (name, guild) => {
-  return guild.channels.cache.find(c => c.type === "GUILD_CATEGORY" && c.name.toLowerCase().includes(name.toLowerCase()) && !c.name.toLowerCase().includes("🔐"));
-};
-
-const getLockedCourse = (name, guild) => {
-  return guild.channels.cache.find(c => c.type === "GUILD_CATEGORY" && c.name.toLowerCase().includes(name.toLowerCase()) && c.name.toLowerCase().includes("🔐"));
-};
-
-const getHiddenCourse = (name, guild) => {
-  return guild.channels.cache.find(c => c.type === "GUILD_CATEGORY" && c.name.toLowerCase().includes(name.toLowerCase()) && c.name.toLowerCase().includes("👻"));
-};
-
-const getPublicCourse = (name, guild) => {
-  return guild.channels.cache.find(c => c.type === "GUILD_CATEGORY" && c.name.toLowerCase().includes(name.toLowerCase()) && !c.name.toLowerCase().includes("👻"));
-};
 
 const cooldownMap = new Map();
 
@@ -40,54 +30,6 @@ const findOrCreateRoleWithName = async (name, guild) => {
   );
 };
 
-const updateGuideMessage = async (message, Course) => {
-  const guild = message.guild;
-  const courseData = await findCoursesFromDb("code", Course, false);
-  const rows = courseData
-    .map((course) => {
-      const regExp = /[^0-9]*/;
-      const fullname = course.fullName;
-      const matches = regExp.exec(course.code)?.[0];
-      const code = matches ? matches + course.code.slice(matches.length) : course.code;
-      const count = guild.roles.cache.find(
-        (role) => role.name === course.name,
-      )?.members.size;
-      return `  - ${code} - ${fullname} 👤${count}`;
-    });
-
-  const newContent = `
-Käytössäsi on seuraavia komentoja:
-  - \`/join\` jolla voit liittyä kurssille
-  - \`/leave\` jolla voit poistua kurssilta
-Kirjoittamalla \`/join\` tai \`/leave\` botti antaa listan kursseista.
-
-You have the following commands available:
-  - \`/join\` which you can use to join a course
-  - \`/leave\` which you can use to leave a course
-The bot gives a list of the courses if you type \`/join\` or \`/leave\`.
-
-Kurssit / Courses:
-${rows.join("\n")}
-
-In course specific channels you can also list instructors with the command \`/instructors\`
-
-See more with \`/help\` command.
-
-Invitation link for the server ${invite_url}
-`;
-
-  await message.edit(newContent);
-};
-
-const updateGuide = async (guild, Course) => {
-  const channel = guild.channels.cache.find(
-    (c) => c.name === GUIDE_CHANNEL_NAME,
-  );
-  const messages = await channel.messages.fetchPinned(true);
-  const message = messages.first();
-  await updateGuideMessage(message, Course);
-};
-
 const createCourseInvitationLink = (courseName) => {
   courseName = courseName.replace(/ /g, "%20").trim();
   return `Invitation link for the course <${invite_url}/join/${courseName}>`;
@@ -99,7 +41,7 @@ const createInvitation = async (guild, args) => {
   );
   const name = args;
   const category = guild.channels.cache.find(
-    c => c.type === "GUILD_CATEGORY" && c.name.toLowerCase().includes(name.toLowerCase()),
+    c => c.type === "GUILD_CATEGORY" && getCourseNameFromCategory(c.name.toLowerCase()) === name.toLowerCase(),
   );
   const course = guild.channels.cache.find(
     (c => c.parent === category),
@@ -123,6 +65,7 @@ const findCategoryWithCourseName = (courseString, guild) => {
     return category;
   }
   catch (error) {
+    logError(error);
     // console.log(error);
   }
 };
@@ -154,6 +97,15 @@ const handleCooldown = (courseName) => {
   }, cooldownTimeMs);
 };
 
+const getChannelObject = (roleName, channelName, category) => {
+  roleName = roleName.replace(/ /g, "-");
+  return {
+    name: `${roleName}_${channelName}`,
+    parent: category,
+    options: { type: "GUILD_TEXT", parent: category, permissionOverwrites: [] },
+  };
+};
+
 const findOrCreateChannel = async (channelObject, guild) => {
   const { name, options } = channelObject;
   const alreadyExists = guild.channels.cache.find(
@@ -167,22 +119,6 @@ const findOrCreateChannel = async (channelObject, guild) => {
   return await guild.channels.create(name, options);
 };
 
-const setCoursePositionABC = async (guild, courseString) => {
-  let first = 9999;
-  const result = guild.channels.cache
-    .filter(c => c.type === "GUILD_CATEGORY" && c.name.startsWith("📚"))
-    .map((c) => {
-      const categoryName = c.name;
-      if (first > c.position) first = c.position;
-      return categoryName;
-    }).sort((a, b) => a.localeCompare(b));
-
-  const category = guild.channels.cache.find(c => c.type === "GUILD_CATEGORY" && c.name.toLowerCase() === courseString.toLowerCase());
-  if (category) {
-    await category.edit({ position: result.indexOf(courseString) + first });
-  }
-};
-
 const deletecommand = async (client, commandToDeleteName) => {
   client.api.applications(client.user.id).guilds(process.env.GUILD_ID).commands.get().then(commands => {
     commands.forEach(async command => {
@@ -193,13 +129,12 @@ const deletecommand = async (client, commandToDeleteName) => {
   });
 };
 
-const emojiRegex = /(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])/gi;
+const emojiRegex = new RegExp(/(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])/gi);
 
-const isCourseCategory = (channel) => {
-  if (channel && channel.name) {
-    return emojiRegex.test(channel.name);
-  }
-  return false;
+const containsEmojis = (text) => {
+  const result = emojiRegex.test(text);
+  emojiRegex.lastIndex = 0;
+  return result;
 };
 
 const getCourseNameFromCategory = (category) => {
@@ -210,191 +145,303 @@ const getCourseNameFromCategory = (category) => {
   else {
     trimmedName = category.replace(emojiRegex, "").trim();
   }
-
   return trimmedName;
 };
 
-const findAllCourseNames = (guild) => {
-  const courseNames = [];
+const findAndUpdateInstructorRole = async (name, guild, adminRole) => {
+  const oldInstructorRole = guild.roles.cache.find((role) => role.name !== name && role.name.includes(name));
+  if (oldInstructorRole) {
+    oldInstructorRole.setName(`${name} ${adminRole}`);
+  }
+};
 
-  guild.channels.cache.forEach(channel => {
-    if (isCourseCategory(channel)) {
-      courseNames.push(getCourseNameFromCategory(channel));
+const downloadImage = async (course) => {
+  const url = `http://95.216.219.139/grafana/render/d-solo/WpYTNiOnz/discord-dashboard?orgId=1&from=now-30d&to=now&var-course=${course}&panelId=5&width=1000&height=500&tz=Europe%2FHelsinki`;
+  const directory = path.resolve(__dirname, "../../promMetrics/graph/");
+
+  if (!fs.existsSync(directory)) {
+    fs.mkdirSync(directory);
+  }
+
+  const filepath = path.resolve(__dirname, directory, "graph.png");
+  const writer = fs.createWriteStream(filepath);
+
+  try {
+    const response = await axios.get(url, {
+      responseType: "stream",
+      headers: { "Authorization": `Bearer ${process.env.GRAFANA_TOKEN}` },
+    });
+    response.data.pipe(writer);
+
+    return new Promise((resolve, reject) => {
+      writer.on("finish", resolve);
+      writer.on("error", reject);
+    });
+  }
+  catch (error) {
+    logError(error);
+    return;
+  }
+};
+
+const getWorkshopInfo = async (courseCode) => {
+  const startDate = new Date();
+  const endDate = new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const url = `https://study.cs.helsinki.fi/pajat2/api/public/instruction-sessions?from=${startDate.toISOString().split("T")[0]}&to=${endDate.toISOString().split("T")[0]}&courseCodes=${courseCode}`;
+
+  try {
+    const response = await axios.get(url);
+    if (response.data.length === 0) {
+      return "No workshops for this course. Please contact the course admin.";
+    }
+    let msg = "";
+    response.data.forEach((s) => {
+      let description;
+      (s.description !== null && s.description !== "") ? description = `Description: ${s.description}\n` : description = "\n";
+      const startTime = s.startTime.split(":");
+      const endTime = s.endTime.split(":");
+      msg = msg.concat(`**${new Date(s.sessionDate).toLocaleString("en-US", { dateStyle: "full" })}**
+      Between: ${startTime[0]}:${startTime[1]} - ${endTime[0]}:${endTime[1]}
+      Location: ${s.instructionLocation.name}
+      Instructor: ${s.user.fullName}
+      ${description}`);
+    });
+    return msg;
+  }
+  catch (error) {
+    logError(error);
+    return;
+  }
+};
+
+const listCourseInstructors = async (guild, roleString) => {
+
+  const facultyRoleObject = await guild.roles.cache.find(r => r.name === facultyRole);
+  const instructorRole = await guild.roles.cache.find(r => r.name === `${roleString} ${courseAdminRole}`);
+  const members = await guild.members.fetch();
+  let adminsString = "";
+
+  members.forEach(m => {
+    const roles = m._roles;
+    if (roles.some(r => r === facultyRoleObject.id) && roles.some(r => r === instructorRole.id)) {
+      if (adminsString === "") {
+        adminsString = "<@" + m.user.id + ">";
+      }
+      else {
+        adminsString = adminsString + ", " + "<@" + m.user.id + ">";
+      }
     }
   });
-  return courseNames;
-};
 
-const findAndUpdateInstructorRole = async (name, guild, courseAdminRole) => {
-  const oldInstructorRole = guild.roles.cache.find((role) => role.name !== name && role.name.includes(name));
-  oldInstructorRole.setName(`${name} ${courseAdminRole}`);
-};
-
-const setCourseToPrivate = async (courseName, Course) => {
-  const course = await Course.findOne({
-    where:
-      { name: { [Sequelize.Op.iLike]: courseName } },
+  members.forEach(m => {
+    const roles = m._roles;
+    if (!roles.some(r => r === facultyRoleObject.id) && roles.some(r => r === instructorRole.id)) {
+      if (adminsString === "") {
+        adminsString = "<@" + m.user.id + ">";
+      }
+      else {
+        adminsString = adminsString + ", " + "<@" + m.user.id + ">";
+      }
+    }
   });
-  if (course) {
-    course.private = true;
-    await course.save();
+  return adminsString;
+};
+
+const updateAnnouncementChannelMessage = async (guild, channelAnnouncement) => {
+  const pinnedMessages = await channelAnnouncement.messages.fetchPinned();
+  const invMessage = pinnedMessages.find(msg => msg.author.bot && msg.content.includes("Invitation link for"));
+  const courseName = getCourseNameFromCategory(channelAnnouncement.parent);
+  let updatedMsg = createCourseInvitationLink(courseName);
+  const instructors = await listCourseInstructors(guild, courseName);
+  if (instructors !== "") {
+    updatedMsg = updatedMsg + "\nInstructors for the course:" + instructors;
+  }
+  await invMessage.edit(updatedMsg);
+};
+
+const updateInviteLinks = async (guild) => {
+  const announcementChannels = guild.channels.cache.filter(c => c.name.includes("announcement"));
+  await Promise.all(announcementChannels.map(async aChannel => {
+    await updateAnnouncementChannelMessage(guild, aChannel);
+  }));
+};
+
+const updateGuide = async (guild, models) => {
+  const channel = guild.channels.cache.find(
+    (c) => c.name === GUIDE_CHANNEL_NAME,
+  );
+  const messages = await channel.messages.fetchPinned(true);
+  const message = messages.first();
+  await updateGuideMessage(message, models);
+};
+
+const updateGuideMessage = async (message, models) => {
+  const courseData = await findCoursesFromDb("code", models.Course, false);
+  const rows = await Promise.all(courseData
+    .map(async (course) => {
+      const regExp = /[^0-9]*/;
+      const fullname = course.fullName;
+      const matches = regExp.exec(course.code)?.[0];
+      const code = matches ? matches + course.code.slice(matches.length) : course.code;
+      const count = await findCourseMemberCount(course.id, models.CourseMember);
+      return `  - ${code} - ${fullname} 👤${count}`;
+    }));
+
+  const newContent = `
+Käytössäsi on seuraavia komentoja:
+  - \`/join\` jolla voit liittyä kurssille
+  - \`/leave\` jolla voit poistua kurssilta
+Kirjoittamalla \`/join\` tai \`/leave\` botti antaa listan kursseista.
+
+You have the following commands available:
+  - \`/join\` which you can use to join a course
+  - \`/leave\` which you can use to leave a course
+The bot gives a list of the courses if you type \`/join\` or \`/leave\`.
+
+Kurssit / Courses:
+${rows.join("\n")}
+
+In course specific channels you can also list instructors with the command \`/instructors\`
+
+See more with \`/help\` command.
+
+Invitation link for the server ${invite_url}
+`;
+
+  await message.edit(newContent);
+};
+
+const isCourseCategory = async (channel, Course) => {
+  if (channel && channel.name) {
+    const course = await findCourseFromDb(getCourseNameFromCategory(channel.name), Course);
+    return course ? true : false;
   }
 };
 
-const setCourseToPublic = async (courseName, Course) => {
-  const course = await Course.findOne({
-    where:
-      { name: { [Sequelize.Op.iLike]: courseName } },
+const setCoursePositionABC = async (guild, courseString, Course) => {
+  let first = 9999;
+  const categoryNames = await findAllCourseNames(Course);
+  categoryNames.sort((a, b) => a.localeCompare(b));
+  const categories = [];
+  categoryNames.forEach(cat => {
+    const guildCat = findCategoryWithCourseName(cat, guild);
+    if (guildCat) {
+      categories.push(guildCat);
+      if (first > guildCat.position) first = guildCat.position;
+    }
   });
-  if (course) {
-    course.private = false;
-    await course.save();
+  const course = courseString.split(" ")[1];
+
+  const category = findCategoryWithCourseName(course, guild);
+  if (category) {
+    await category.edit({ position: categories.indexOf(category) + first });
   }
 };
 
-const setCourseToLocked = async (courseName, Course, guild) => {
-  const course = await Course.findOne({
-    where:
-      { name: { [Sequelize.Op.iLike]: courseName } },
-  });
-  if (course) {
-    course.locked = true;
-    const category = findChannelWithNameAndType(courseName, "GUILD_CATEGORY", guild);
-    category.permissionOverwrites.create(guild.roles.cache.find(r => r.name.toLowerCase() === courseName.toLowerCase()), { VIEW_CHANNEL: true, SEND_MESSAGES: false });
-    category.permissionOverwrites.create(guild.roles.cache.find(r => r.name.toLowerCase() === `${courseName.toLowerCase()} instructor`), { VIEW_CHANNEL: true, SEND_MESSAGES: true });
-    category.permissionOverwrites.create(guild.roles.cache.find(r => r.name === "faculty"), { SEND_MESSAGES: true });
-    await course.save();
-  }
-};
+const getCategoryChannelPermissionOverwrites = (guild, admin, student) => ([
+  {
+    id: guild.id,
+    deny: ["VIEW_CHANNEL"],
+  },
+  {
+    id: guild.me.roles.highest,
+    allow: ["VIEW_CHANNEL"],
+  },
+  {
+    id: admin.id,
+    allow: ["VIEW_CHANNEL"],
+  },
+  {
+    id: student.id,
+    allow: ["VIEW_CHANNEL"],
+  },
+]);
 
-const setCourseToUnlocked = async (courseName, Course, guild) => {
-  const course = await Course.findOne({
-    where:
-      { name: { [Sequelize.Op.iLike]: courseName } },
-  });
-  if (course) {
-    course.locked = false;
-    const category = findChannelWithNameAndType(courseName, "GUILD_CATEGORY", guild);
-    category.permissionOverwrites.create(guild.roles.cache.find(r => r.name.toLowerCase().includes(courseName.toLowerCase())), { VIEW_CHANNEL: true, SEND_MESSAGES: true });
-    await course.save();
-  }
-};
+const getDefaultChannelObjects = async (guild, courseName, student, admin, category) => {
+  courseName = courseName.replace(/ /g, "-");
 
-const createCourseToDatabase = async (courseCode, courseFullName, courseName, Course) => {
-  const alreadyinuse = await Course.findOne({
-    where:
-      { name: { [Sequelize.Op.iLike]: courseName } },
-  });
-  if (!alreadyinuse) {
-    await Course.create({ code: courseCode, fullName: courseFullName, name: courseName, private: false });
-  }
-};
-
-const removeCourseFromDb = async (courseName, Course) => {
-  const course = await Course.findOne({
-    where:
-      { name: { [Sequelize.Op.iLike]: courseName } },
-  });
-  if (course) {
-    await Course.destroy({
-      where:
-        { name: { [Sequelize.Op.iLike]: courseName } },
-    });
-  }
-};
-
-const findCourseFromDb = async (courseName, Course) => {
-  return await Course.findOne({
-    where:
-      { name: { [Sequelize.Op.iLike]: courseName } },
-  });
-};
-
-const findCoursesFromDb = async (order, Course, state) => {
-  const filter = {
-    true: { private: true },
-    false: { private: false },
-    undefined: {},
-  };
-  return await Course.findAll({
-    attributes: ["code", "fullName", "name"],
-    order: [order],
-    where: filter[state],
-    raw: true,
-  });
-};
-
-const findCourseFromDbWithFullName = async (courseFullName, Course) => {
-  return await Course.findOne({
-    where: {
-      fullName: { [Sequelize.Op.iLike]: courseFullName },
+  return [
+    {
+      name: `${courseName}_announcement`,
+      options: {
+        type: "GUILD_TEXT",
+        description: "Messages from course admins",
+        parent: category,
+        permissionOverwrites: [
+          {
+            id: guild.id,
+            deny: ["VIEW_CHANNEL"],
+          },
+          {
+            id: student,
+            deny: ["SEND_MESSAGES"],
+            allow: ["VIEW_CHANNEL"],
+          },
+          {
+            id: admin,
+            allow: ["VIEW_CHANNEL", "SEND_MESSAGES"],
+          },
+        ],
+      },
     },
-  });
-};
-
-const findCourseNickNameFromDbWithCourseCode = async (courseName, Course) => {
-  return await Course.findOne({
-    where: {
-      code: { [Sequelize.Op.iLike]: courseName },
+    {
+      name: `${courseName}_general`,
+      parent: category,
+      options: { type: "GUILD_TEXT", parent: category, permissionOverwrites: [] },
     },
-  });
-};
-
-const findChannelFromDbByName = async (channelName, Channel) => {
-  return await Channel.findOne({
-    where: {
-      name: { [Sequelize.Op.iLike]: channelName },
+    {
+      name: `${courseName}_voice`,
+      parent: category,
+      options: { type: "GUILD_VOICE", parent: category, permissionOverwrites: [] },
     },
-  });
+  ];
 };
 
-const createChannelToDatabase = async (courseId, channelName, Channel) => {
-  const alreadyinuse = await Channel.findOne({
-    where:
-      { name: { [Sequelize.Op.iLike]: channelName } },
-  });
-  if (!alreadyinuse) {
-    await Channel.create({ name: channelName, courseId: courseId });
-  }
+const getCategoryObject = (categoryName, permissionOverwrites) => ({
+  name: `📚 ${categoryName}`,
+  options: {
+    type: "GUILD_CATEGORY",
+    permissionOverwrites,
+  },
+});
+
+const getUserWithUserId = async (guild, userId) => {
+  return await guild.members.cache.get(userId);
 };
 
-const removeChannelFromDb = async (channelName, Channel) => {
-  const channel = await Channel.findOne({
-    where:
-      { name: { [Sequelize.Op.iLike]: channelName } },
-  });
-  if (channel) {
-    await Channel.destroy({
-      where:
-        { name: { [Sequelize.Op.iLike]: channelName } },
-    });
-  }
-};
-
-const findChannelsByCourse = async (id, Channel) => {
-  return await Channel.findAll({
-    where: {
-      courseId: id,
+const changeCourseRoles = async (courseName, newValue, guild) => {
+  await Promise.all(guild.roles.cache
+    .filter(r => (r.name === `${courseName} ${courseAdminRole}` || r.name === courseName))
+    .map(async role => {
+      if (role.name.includes("instructor")) {
+        role.setName(`${newValue} instructor`);
+      }
+      else {
+        role.setName(newValue);
+      }
     },
-  });
+    ));
 };
 
-const editChannelNames = async (courseId, previousCourseName, newCourseName, Channel) => {
-  const channels = await findChannelsByCourse(courseId, Channel);
-  channels.map(async (channel) => {
-    const newChannelName = channel.name.replace(previousCourseName, newCourseName);
-    channel.name = newChannelName;
-    await channel.save();
-  });
-  await Promise.all(channels);
+const setEmojisLock = async (category, hidden, courseName) => {
+  hidden ? await category.setName(`👻🔐 ${courseName}`) : await category.setName(`📚🔐 ${courseName}`);
 };
 
+const setEmojisUnlock = async (category, hidden, courseName) => {
+  hidden ? await category.setName(`👻 ${courseName}`) : await category.setName(`📚 ${courseName}`);
+};
+
+const setEmojisHide = async (category, locked, courseName) => {
+  locked ? await category.setName(`👻🔐 ${courseName}`) : await category.setName(`👻 ${courseName}`);
+};
+
+const setEmojisUnhide = async (category, locked, courseName) => {
+  locked ? await category.setName(`📚🔐 ${courseName}`) : await category.setName(`📚 ${courseName}`);
+};
 
 module.exports = {
-  findOrCreateRoleWithName,
   findCategoryWithCourseName,
-  updateGuideMessage,
-  updateGuide,
+  findOrCreateRoleWithName,
   createInvitation,
   findChannelWithNameAndType,
   findChannelWithId,
@@ -403,29 +450,27 @@ module.exports = {
   handleCooldown,
   createCourseInvitationLink,
   findOrCreateChannel,
-  setCoursePositionABC,
   deletecommand,
-  isCourseCategory,
   getCourseNameFromCategory,
-  findAllCourseNames,
   findAndUpdateInstructorRole,
-  setCourseToPrivate,
-  setCourseToPublic,
-  setCourseToLocked,
-  setCourseToUnlocked,
-  createCourseToDatabase,
-  removeCourseFromDb,
-  findCourseFromDb,
-  findCourseFromDbWithFullName,
-  findCoursesFromDb,
-  findCourseNickNameFromDbWithCourseCode,
-  findChannelFromDbByName,
-  createChannelToDatabase,
-  removeChannelFromDb,
-  findChannelsByCourse,
-  getHiddenCourse,
-  getLockedCourse,
-  getPublicCourse,
-  getUnlockedCourse,
-  editChannelNames,
+  listCourseInstructors,
+  updateInviteLinks,
+  downloadImage,
+  containsEmojis,
+  getUserWithUserId,
+  getChannelObject,
+  getCategoryChannelPermissionOverwrites,
+  getDefaultChannelObjects,
+  getCategoryObject,
+  getWorkshopInfo,
+  changeCourseRoles,
+  updateAnnouncementChannelMessage,
+  setEmojisLock,
+  setEmojisUnlock,
+  setEmojisHide,
+  setEmojisUnhide,
+  updateGuide,
+  updateGuideMessage,
+  setCoursePositionABC,
+  isCourseCategory,
 };

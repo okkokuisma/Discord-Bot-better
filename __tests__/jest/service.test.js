@@ -1,27 +1,25 @@
+const axios = require("axios");
+jest.mock("axios");
 const {
   findOrCreateRoleWithName,
-  updateGuideMessage,
   createInvitation,
   findCategoryWithCourseName,
-  createCourseToDatabase,
-  removeCourseFromDb,
-  findChannelWithNameAndType,
   findChannelWithId,
   msToMinutesAndSeconds,
   findOrCreateChannel,
-  setCoursePositionABC,
-  isCourseCategory,
   getCourseNameFromCategory,
-  findAllCourseNames } = require("../../src/discordBot/services/service");
+  findChannelWithNameAndType,
+  getWorkshopInfo,
+  updateGuideMessage } = require("../../src/discordBot/services/service");
+const { createCourseToDatabase, removeCourseFromDb } = require("../../src/db/services/courseService");
+const { data } = require("../mocks/workshopData.json");
 
-const createGuidePinnedMessage = async (guild) => {
+const createGuidePinnedMessage = async () => {
   const rows = courses
     .map((course) => {
       const code = course.code;
       const fullname = course.fullName;
-      const count = guild.roles.cache.find(
-        (role) => role.name === course.name,
-      )?.members.size;
+      const count = 1;
       return `  - ${code} - ${fullname} 👤${count}`;
     });
 
@@ -63,6 +61,23 @@ const Course = {
   destroy: jest.fn(),
 };
 
+const CourseMember = {
+  create: jest.fn(),
+  findOne: jest
+    .fn(() => true)
+    .mockImplementationOnce(() => false)
+    .mockImplementationOnce(() => false),
+  findAll: jest.fn(() => null),
+  count: jest
+    .fn()
+    .mockImplementationOnce(() => 1),
+  destroy: jest.fn(),
+};
+
+const models = {
+  Course, CourseMember,
+};
+
 const { client } = require("../mocks/mockSlashClient");
 
 afterEach(() => {
@@ -91,7 +106,7 @@ describe("Service", () => {
     expect(client.guild.roles.cache.size).toBe(1);
   });
 
-  test("Dublicated role cannot be created", async () => {
+  test("Duplicated role cannot be created", async () => {
     const roleName = "test";
     await findOrCreateRoleWithName(roleName, client.guild);
     await findOrCreateRoleWithName(roleName, client.guild);
@@ -128,7 +143,7 @@ describe("Service", () => {
     client.guild.roles.cache = [role];
     const msg = { guild: client.guild, pin: jest.fn(), edit: jest.fn() };
     const guideMessage = await createGuidePinnedMessage(client.guild, Course);
-    await updateGuideMessage(msg, Course);
+    await updateGuideMessage(msg, models);
     expect(msg.edit).toHaveBeenCalledTimes(1);
     expect(msg.edit).toHaveBeenCalledWith(guideMessage);
     client.guild.channels.cache = [];
@@ -223,28 +238,6 @@ describe("Service", () => {
     expect(guild.channels.create).toHaveBeenCalledTimes(0);
   });
 
-  test("setCourse positions", async () => {
-    client.guild.channels.init();
-    client.guild.channels.create("📚 testA", { type: "GUILD_CATEGORY" });
-    const categoryA = client.guild.channels.cache.find(c => c.name === "📚 testA");
-    setCoursePositionABC(client.guild, "📚 testA");
-    expect(categoryA.edit).toHaveBeenCalledTimes(1);
-  });
-
-  test("valid private category is course category", async () => {
-    const privateCategoryName = "🔒 test";
-    const channel = { name: privateCategoryName };
-    const result = isCourseCategory(channel);
-    expect(result).toBe(true);
-  });
-
-  test("channel without emoji is not course category", async () => {
-    const privateCategoryName = "test";
-    const channel = { name: privateCategoryName };
-    const result = isCourseCategory(channel);
-    expect(result).toBe(false);
-  });
-
   test("trimmer returs correct string public", async () => {
     const category = "test";
     const privateCategoryName = "📚 test";
@@ -261,23 +254,41 @@ describe("Service", () => {
     expect(result).toBe(category);
   });
 
-  test("find all channel names", async () => {
-    client.guild.channels.init();
-    const guild = client.guild;
-    guild.channels.cache.set(1, { name: "🔒 test" });
-    guild.channels.cache.set(2, { name: "testing" });
-    const channelNames = ["test"];
-    const result = findAllCourseNames(guild);
-    expect(result).toStrictEqual(channelNames);
+  test("Get workshops info returns proper info for course that exists", async () => {
+    axios.get.mockImplementationOnce(() =>
+      Promise.resolve({
+        data: data,
+      }),
+    );
+    let returnedValue = "";
+    returnedValue = returnedValue.concat(`**Monday, November 29, 2021**
+      Between: 14:00 - 16:00
+      Location: BK107
+      Instructor: Kalle Ilves
+      \n`);
+    returnedValue = returnedValue.concat(`**Wednesday, December 1, 2021**
+      Between: 14:00 - 16:00
+      Location: BK107
+      Instructor: Markus Kaihola
+      \n`);
+    returnedValue = returnedValue.concat(`**Thursday, December 2, 2021**
+      Between: 14:00 - 16:00
+      Location: Remote
+      Instructor: Matti Luukkainen
+      Description: Ohjaus järjestetään zoomissa\n`);
+
+    const result = await getWorkshopInfo("TKT-101");
+    expect(result).toBe(returnedValue);
   });
 
-  test("find all channel names", async () => {
-    client.guild.channels.init();
-    const guild = client.guild;
-    guild.channels.cache.set(1, { name: "🔒 test" });
-    guild.channels.cache.set(2, { name: "testing" });
-    const channelNames = ["test"];
-    const result = findAllCourseNames(guild);
-    expect(result).toStrictEqual(channelNames);
+  test("Get workshops info returns proper info for course that doesn't exist", async () => {
+    axios.get.mockImplementationOnce(() =>
+      Promise.resolve({
+        data: [],
+      }),
+    );
+
+    const result = await getWorkshopInfo("TKT-101");
+    expect(result).toBe("No workshops for this course. Please contact the course admin.");
   });
 });

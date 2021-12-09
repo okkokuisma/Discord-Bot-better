@@ -6,15 +6,21 @@
   "scripts": {
     "start": "cross-env NODE_ENV=production node src/index.js",
     "dev": "cross-env NODE_ENV=development nodemon src/index.js",
-    "jest": "jest --coverage --verbose --runInBand --detectOpenHandles",
-    "test": "jest --coverage --runInBand",
+    "jest": "cross-env NODE_ENV=test jest --coverage --verbose --runInBand --detectOpenHandles",
+    "test": "cross-env NODE_ENV=test jest --coverage --runInBand",
     "lint": "eslint ."
   },
   "jest": {
     "coveragePathIgnorePatterns": [
       "/src/bridge/",
       "/node_modules/",
-      "__tests__"
+      "__tests__",
+      "/src/db/hookInit.js",
+      "/src/discordBot/services/command.js",
+      "/src/discordBot/services/logger.js",
+      "src/discordBot/services/confirm.js",
+      "src/discordBot/commands/faculty/create_poll.js",
+      "src/discordBot/commands/admin/update_database.js"
     ],
     "testRegex": "./__tests__/jest"
   },
@@ -31,6 +37,8 @@
   "dependencies": {
     "@discordjs/builders": "^0.6.0",
     "@discordjs/rest": "^0.1.1-canary.0",
+    "axios": "^0.24.0",
+    "connect-flash": "^0.1.1",
     "connect-session-sequelize": "^7.1.1",
     "discord-api-types": "^0.22.0",
     "discord.js": "^13.1.0",
@@ -44,7 +52,9 @@
     "prom-client": "^14.0.0",
     "sequelize": "^6.6.2",
     "telegraf": "^4.4.0",
-    "umzug": "^2.3.0"
+    "umzug": "^2.3.0",
+    "winston": "^3.3.3",
+    "winston-papertrail": "github:kenperkins/winston-papertrail#v2"
   },
   "devDependencies": {
     "cross-env": "^7.0.3",

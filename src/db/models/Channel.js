@@ -20,6 +20,21 @@ module.exports = (sequelize, DataTypes) => {
       defaultValue: true,
       unique: false,
     },
+    defaultChannel: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+      unique: false,
+    },
+    voiceChannel: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+      unique: false,
+    },
+    discordId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      unique: true,
+    },
   }, {
     timestamps: false,
     freezeTableName: true,

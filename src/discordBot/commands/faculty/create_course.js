@@ -1,96 +1,30 @@
 const { SlashCommandBuilder } = require("@discordjs/builders");
+const { containsEmojis } = require("../../services/service");
 const {
-  findOrCreateRoleWithName,
-  createInvitation,
-  updateGuide,
-  findOrCreateChannel,
-  setCoursePositionABC,
   createCourseToDatabase,
   findCourseFromDb,
-  findCourseFromDbWithFullName } = require("../../services/service");
+  findCourseFromDbWithFullName } = require("../../../db/services/courseService");
 const { sendErrorEphemeral, sendEphemeral, editEphemeral } = require("../../services/message");
-const { courseAdminRole, facultyRole } = require("../../../../config.json");
-
-const getPermissionOverwrites = (guild, admin, student) => ([
-  {
-    id: guild.id,
-    deny: ["VIEW_CHANNEL"],
-  },
-  {
-    id: guild.me.roles.highest,
-    allow: ["VIEW_CHANNEL"],
-  },
-  {
-    id: admin.id,
-    allow: ["VIEW_CHANNEL"],
-  },
-  {
-    id: student.id,
-    allow: ["VIEW_CHANNEL"],
-  },
-]);
-
-const getChannelObjects = (guild, admin, student, roleName, category) => {
-  roleName = roleName.replace(/ /g, "-");
-  return [
-    {
-      name: `${roleName}_announcement`,
-      options: {
-        type: "GUILD_TEXT",
-        description: "Messages from course admins",
-        parent: category,
-        permissionOverwrites: [
-          {
-            id: guild.id,
-            deny: ["VIEW_CHANNEL"],
-          },
-          {
-            id: student,
-            deny: ["SEND_MESSAGES"],
-            allow: ["VIEW_CHANNEL"],
-          },
-          {
-            id: admin,
-            allow: ["VIEW_CHANNEL", "SEND_MESSAGES"],
-          },
-        ],
-      },
-    },
-    {
-      name: `${roleName}_general`,
-      parent: category,
-      options: { type: "GUILD_TEXT", parent: category, permissionOverwrites: [] },
-    },
-    {
-      name: `${roleName}_voice`,
-      parent: category,
-      options: { type: "GUILD_VOICE", parent: category, permissionOverwrites: [] },
-    },
-  ];
-};
-
-const getCategoryObject = (categoryName, permissionOverwrites) => ({
-  name: `📚 ${categoryName}`,
-  options: {
-    type: "GUILD_CATEGORY",
-    permissionOverwrites,
-  },
-});
+const { facultyRole } = require("../../../../config.json");
 
 const execute = async (interaction, client, models) => {
-  const courseCode = interaction.options.getString("coursecode").trim();
+  const courseCode = interaction.options.getString("coursecode").replace(/\s/g, "");
   const courseFullName = interaction.options.getString("full_name").trim();
   if (await findCourseFromDbWithFullName(courseFullName, models.Course)) return await sendErrorEphemeral(interaction, "Course fullname must be unique.");
 
   let courseName;
   let errorMessage;
   if (!interaction.options.getString("nick_name")) {
-    courseName = courseCode;
+    courseName = courseCode.toLowerCase();
     errorMessage = "Course code must be unique.";
   }
   else {
-    courseName = interaction.options.getString("nick_name").trim();
+    courseName = interaction.options.getString("nick_name").replace(/\s/g, "").toLowerCase();
     errorMessage = "Course nick name must be unique.";
+  }
+
+  if (containsEmojis(courseCode) || containsEmojis(courseFullName) || containsEmojis(courseName)) {
+    return await sendErrorEphemeral(interaction, "Emojis are not allowed!");
   }
 
   const courseNameConcat = courseCode + " - " + courseFullName + " - " + courseName;
@@ -100,25 +34,9 @@ const execute = async (interaction, client, models) => {
 
   if (await findCourseFromDb(courseName, models.Course)) return await sendErrorEphemeral(interaction, errorMessage);
   await sendEphemeral(interaction, "Creating course...");
-  const guild = client.guild;
-
-  const student = await findOrCreateRoleWithName(courseName, guild);
-  const admin = await findOrCreateRoleWithName(`${courseName} ${courseAdminRole}`, guild);
-
-  const categoryObject = getCategoryObject(courseName, getPermissionOverwrites(guild, admin, student));
-  const category = await findOrCreateChannel(categoryObject, guild);
-
-  const channelObjects = getChannelObjects(guild, admin, student, courseName, category);
-  await Promise.all(channelObjects.map(
-    async channelObject => await findOrCreateChannel(channelObject, guild),
-  ));
 
   await createCourseToDatabase(courseCode, courseFullName, courseName, models.Course);
-  await setCoursePositionABC(guild, categoryObject.name);
-  await createInvitation(guild, courseName);
   await editEphemeral(interaction, `Created course ${courseName}.`);
-  await client.emit("COURSES_CHANGED", models.Course);
-  await updateGuide(client.guild, models.Course);
 };
 
 module.exports = {

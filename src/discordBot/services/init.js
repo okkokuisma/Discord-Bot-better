@@ -1,12 +1,15 @@
-const { findOrCreateRoleWithName, updateGuide } = require("./service");
+const { findOrCreateRoleWithName } = require("./service");
 const { facultyRole, githubRepo } = require("../../../config.json");
+const { updateGuide } = require("../../discordBot/services/service");
+const { initHooks } = require("../../db/hookInit");
+const { sendPullDateMessage } = require("./message");
 
 const findOrCreateChannel = async (channelObject, guild) => {
   const { name, options } = channelObject;
   const alreadyExists = guild.channels.cache.find(
     (c) => c.type === options.type && c.name.toLowerCase() === name.toLowerCase());
   if (alreadyExists) {
-    if (options?.topic && alreadyExists.topic !== options.topic) {
+    if (options?.topic && alreadyExists.topic !== options.topic && process.env.NODE_ENV === "production") {
       return await alreadyExists.setTopic(options.topic);
     }
     return alreadyExists;
@@ -35,7 +38,7 @@ const initChannels = async (guild, client) => {
       options: {
         type: "GUILD_TEXT",
         topic: `User manual for students: ${githubRepo}/blob/main/documentation/usermanual-student.md`,
-        permissionOverwrites: [{ id: guild.id, deny: ["SEND_MESSAGES"], "allow": ["VIEW_CHANNEL"] }, { id: client.user.id, allow: ["SEND_MESSAGES", "VIEW_CHANNEL"] }],
+        permissionOverwrites: [{ id: guild.id, deny: ["SEND_MESSAGES"], allow: ["VIEW_CHANNEL"] }, { id: client.user.id, allow: ["SEND_MESSAGES", "VIEW_CHANNEL"] }],
       },
     },
   ];
@@ -50,7 +53,7 @@ const initRoles = async (guild) => {
   await findOrCreateRoleWithName("admin", guild);
 };
 
-const setInitialGuideMessage = async (guild, channelName, Course) => {
+const setInitialGuideMessage = async (guild, channelName, models) => {
   const guideChannel = guild.channels.cache.find(c => c.type === "GUILD_TEXT" && c.name === channelName);
   if (!guideChannel.lastPinTimestamp) {
     const msg = await guideChannel.send("initial");
@@ -59,13 +62,18 @@ const setInitialGuideMessage = async (guild, channelName, Course) => {
   const invs = await guild.invites.fetch();
   const guideinvite = invs.find(invite => invite.channel.name === "guide");
   if (!guideinvite) await guideChannel.createInvite({ maxAge: 0 });
-  await updateGuide(guild, Course);
+  await updateGuide(guild, models);
 };
 
-const initializeApplicationContext = async (client, Course) => {
+const initializeApplicationContext = async (client, models) => {
+  initHooks(client.guild, models);
   await initRoles(client.guild);
   await initChannels(client.guild, client);
-  await setInitialGuideMessage(client.guild, "guide", Course);
+  await setInitialGuideMessage(client.guild, "guide", models);
+
+  if (process.env.NODE_ENV === "production") {
+    await sendPullDateMessage(client);
+  }
 };
 
 module.exports = {

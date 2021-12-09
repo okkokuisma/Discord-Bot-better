@@ -1,15 +1,12 @@
 const { SlashCommandBuilder } = require("@discordjs/builders");
 const {
-  updateGuide,
   msToMinutesAndSeconds,
   handleCooldown,
-  checkCourseCooldown,
-  setCourseToUnlocked,
-  getHiddenCourse,
-  getLockedCourse } = require("../../services/service");
-const { sendEphemeral, editEphemeral, editErrorEphemeral, confirmChoice } = require("../../services/message");
+  checkCourseCooldown } = require("../../services/service");
+const { setCourseToUnlocked, findCourseFromDb } = require("../../../db/services/courseService");
+const { sendEphemeral, editEphemeral, editErrorEphemeral } = require("../../services/message");
+const { confirmChoice } = require("../../services/confirm");
 const { facultyRole } = require("../../../../config.json");
-const { unlockTelegramCourse } = require("../../../bridge/service");
 
 const execute = async (interaction, client, models) => {
   await sendEphemeral(interaction, "Unlocking course...");
@@ -21,8 +18,8 @@ const execute = async (interaction, client, models) => {
     return await editEphemeral(interaction, "Command declined");
   }
 
-  const category = getLockedCourse(courseName, guild);
-  if (!category) {
+  const categoryInstance = await findCourseFromDb(courseName, models.Course);
+  if (!categoryInstance || !categoryInstance.locked) {
     return await editErrorEphemeral(interaction, `Invalid course name: ${courseName} or the course is unlocked already!`);
   }
   const cooldown = checkCourseCooldown(courseName);
@@ -32,16 +29,8 @@ const execute = async (interaction, client, models) => {
     return await editErrorEphemeral(interaction, `Command cooldown [mm:ss]: you need to wait ${time}!`);
   }
   else {
-    if (getHiddenCourse(courseName, guild)) {
-      await category.setName(`👻 ${courseName}`);
-    }
-    else {
-      await category.setName(`📚 ${courseName}`);
-    }
-    await unlockTelegramCourse(models.Course, courseName);
     await setCourseToUnlocked(courseName, models.Course, guild);
     await client.emit("COURSES_CHANGED", models.Course);
-    await updateGuide(client.guild, models.Course);
     await editEphemeral(interaction, `This course ${courseName} is now unlocked.`);
     handleCooldown(courseName);
   }

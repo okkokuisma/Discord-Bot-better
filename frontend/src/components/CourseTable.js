@@ -19,10 +19,10 @@ const CourseTable = ({ courses }) => {
       <table>
         <thead>
           <tr>
-          <th>Course</th>
-          <th>Full name</th>
-          <th>Nickname</th>
-          <th>Course code</th>
+            <th>Course</th>
+            <th>Full name</th>
+            <th>Nickname</th>
+            <th>Course code</th>
           </tr>
         </thead>
         <tbody>

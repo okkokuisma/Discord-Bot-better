@@ -4,6 +4,7 @@ import Footer from './components/Footer'
 import Error from './components/Error'
 import CourseTable from './components/CourseTable'
 import CourseView from './components/CourseView'
+import CreateCourseForm from './components/CreateCourseForm'
 import courseService from './services/courseService'
 import channelService from "./services/channelService"
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom'
@@ -29,11 +30,16 @@ const App = () => {
   }, []);
 
   return (
-    <div>
+    <div className="content">
       <h1>TEST123</h1>
       <Routes>
         <Route path='/courses/:id' element={ <CourseView courses={ courses } channels={ channels } /> } />
-        <Route path= '/' element={ <CourseTable courses={ courses } /> } />
+        <Route path= '/' element={
+          <div>
+            <CreateCourseForm />
+            <CourseTable courses={ courses } />
+          </div>
+        } />
       </Routes>
       <Footer></Footer>
     </div>

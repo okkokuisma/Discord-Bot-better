@@ -18,10 +18,10 @@ const ChannelTable = ({ channels }) => {
       <table>
         <thead>
           <tr>
-          <th>Name</th>
-          <th>Bridged</th>
-          <th>Default Channel</th>
-          <th>Voice Channel</th>
+            <th>Name</th>
+            <th>Bridged</th>
+            <th>Default Channel</th>
+            <th>Voice Channel</th>
           </tr>
         </thead>
         <tbody>
